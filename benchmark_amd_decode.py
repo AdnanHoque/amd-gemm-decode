@@ -6,30 +6,32 @@ from amd_gemm_kernel_prefill import matmul
 from amd_gemm_kernel_decode import matmul as matmul_decode
 
 def construct_amd_gemm(M: int, K: int, N: int):
+    SCALE_BLOCK_SIZE = 128
 
     # Per-token on Activations
-    SCALE_BLOCK_SIZE = 128
     a = torch.randn((M, K), dtype=torch.float32, device='cuda')
     a = a.view(M, -1, SCALE_BLOCK_SIZE)
-    max_val = a.abs().float().amax(dim=2).view(M, -1).clamp(1e-4)
+    max_val = a.abs().amax(dim=2).view(M, -1).clamp(1e-4)
     a_scale = max_val.unsqueeze(2) / torch.finfo(torch.float8_e4m3fn).max
     a = (a / a_scale).view(M, K)
-    a_scale = a_scale.view(M, -1)
-    a_scale = a_scale.T.contiguous().T
+    a_scale = a_scale.view(M, -1).T.contiguous().T  # Layout-preserving
     a_fp8 = a.to(torch.float8_e4m3fn)
     a_fp32 = a_fp8.to(torch.float32)
-   
+
     # Per-block on Weights
-    b = torch.randn((N, K), dtype=torch.float32, device='cuda').T
-    b_padded = torch.zeros((triton.cdiv(M, SCALE_BLOCK_SIZE) * SCALE_BLOCK_SIZE,
-                        triton.cdiv(N, SCALE_BLOCK_SIZE) * SCALE_BLOCK_SIZE), dtype=b.dtype,
-                        device=b.device)
-    
+    b = torch.randn((K, N), dtype=torch.float32, device='cuda')
+    padded_K = triton.cdiv(K, SCALE_BLOCK_SIZE) * SCALE_BLOCK_SIZE
+    padded_N = triton.cdiv(N, SCALE_BLOCK_SIZE) * SCALE_BLOCK_SIZE
+
+    b_padded = torch.zeros((padded_K, padded_N), dtype=b.dtype, device=b.device)
     b_padded[:K, :N] = b
-    b_view = b_padded.view(-1, SCALE_BLOCK_SIZE, b_padded.size(1) // SCALE_BLOCK_SIZE, SCALE_BLOCK_SIZE)
-    b_amax = b_view.abs().float().amax(dim=(1, 3), keepdim=True).clamp(1e-4)
+
+    b_view = b_padded.view(-1, SCALE_BLOCK_SIZE,
+                           padded_N // SCALE_BLOCK_SIZE, SCALE_BLOCK_SIZE)  # [K_blk, 128, N_blk, 128]
+
+    b_amax = b_view.abs().amax(dim=(1, 3), keepdim=True).clamp(1e-4)
     b_scaled = b_view * (torch.finfo(torch.float8_e4m3fn).max / b_amax)
-    b = b_scaled.view_as(b_padded)[:K, :N].T.contiguous().T
+    b = b_scaled.view_as(b_padded)[:K, :N]
     b_scale = (b_amax / torch.finfo(torch.float8_e4m3fn).max).view(b_view.size(0), b_view.size(2))
 
     b_fp8 = b.to(torch.float8_e4m3fn)
