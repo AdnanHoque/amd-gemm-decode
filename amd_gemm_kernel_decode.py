@@ -199,8 +199,8 @@ def matmul_kernel(
             accumulator += tl.dot(a, b, input_precision="ieee")
 
         # Advance the ptrs to the next K block.
-        a_ptrs += BLOCK_SIZE_K * stride_ak * split_k
-        b_ptrs += BLOCK_SIZE_K * stride_bk * split_k
+        a_ptrs += BLOCK_SIZE_K * stride_ak * SPLIT_K
+        b_ptrs += BLOCK_SIZE_K * stride_bk * SPLIT_K
 
         if APPLY_SCALE == 'block':
             k_cur = k * BLOCK_SIZE_K // GROUP_K
@@ -224,7 +224,7 @@ def matmul_kernel(
     offs_cn = pid_n * BLOCK_SIZE_N + tl.arange(0, BLOCK_SIZE_N)
     c_ptrs = c_ptr + stride_cm * offs_cm[:, None] + stride_cn * offs_cn[None, :]
     c_mask = (offs_cm[:, None] < M) & (offs_cn[None, :] < N)
-    tl.store(c_ptrs, c, mask=c_mask)
+    tl.atomic_add(c_ptrs, c, mask=c_mask)
 
 
 # Activation function.
