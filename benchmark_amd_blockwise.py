@@ -48,7 +48,7 @@ num_threads = torch.get_num_threads()
 print(f'Benchmarking on {num_threads} threads')
 results = []
 
-for m, n, k in ((8192, 4096, 14336), (8192, 8192, 28672), (8192, 16384, 53248)):
+for m, n, k in ((64, 4096, 14336), (64, 8192, 28672), (64, 16384, 53248)):
 
     a_fp8, b_fp8, a_scale, b_scale = construct_amd_gemm(m, n, k)
     c = torch.empty((m, n), device='cuda', dtype=torch.bfloat16)
@@ -65,14 +65,14 @@ for m, n, k in ((8192, 4096, 14336), (8192, 8192, 28672), (8192, 16384, 53248)):
         sub_label=sub_label,
         description='AMD FP8 GEMM Data Parallel').blocked_autorange(min_run_time=1))
     
-    # results.append(benchmark.Timer(
-    #     stmt='amd_splitk_gemm_fn(a, b, c, a_scale, b_scale)',
-    #     setup='from __main__ import amd_splitk_gemm_fn',
-    #     globals={'a': a_fp8, 'b' : b_fp8, 'c' : c, 'a_scale' : a_scale, 'b_scale' : b_scale},
-    #     num_threads=num_threads,
-    #     label=label,
-    #     sub_label=sub_label,
-    #     description='AMD FP8 GEMM SplitK').blocked_autorange(min_run_time=1))
+    results.append(benchmark.Timer(
+        stmt='amd_splitk_gemm_fn(a, b, c, a_scale, b_scale)',
+        setup='from __main__ import amd_splitk_gemm_fn',
+        globals={'a': a_fp8, 'b' : b_fp8, 'c' : c, 'a_scale' : a_scale, 'b_scale' : b_scale},
+        num_threads=num_threads,
+        label=label,
+        sub_label=sub_label,
+        description='AMD FP8 GEMM SplitK').blocked_autorange(min_run_time=1))
     
     
 compare = benchmark.Compare(results)
