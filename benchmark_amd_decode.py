@@ -12,10 +12,10 @@ def construct_amd_gemm(M: int, K: int, N: int):
     a = torch.randn((M, K), dtype=torch.float32, device='cuda')
     a = a.view(M, -1, SCALE_BLOCK_SIZE)
     max_val = a.abs().amax(dim=2).view(M, -1).clamp(1e-4)
-    a_scale = max_val.unsqueeze(2) / torch.finfo(torch.float8_e4m3fn).max
+    a_scale = max_val.unsqueeze(2) / torch.finfo(torch.float8_e4m3fnuz).max
     a = (a / a_scale).view(M, K)
     a_scale = a_scale.view(M, -1).T.contiguous().T  # Layout-preserving
-    a_fp8 = a.to(torch.float8_e4m3fn)
+    a_fp8 = a.to(torch.float8_e4m3fnuz)
     a_fp32 = a_fp8.to(torch.float32)
 
     # Per-block on Weights
@@ -30,11 +30,11 @@ def construct_amd_gemm(M: int, K: int, N: int):
                            padded_N // SCALE_BLOCK_SIZE, SCALE_BLOCK_SIZE)  # [K_blk, 128, N_blk, 128]
 
     b_amax = b_view.abs().amax(dim=(1, 3), keepdim=True).clamp(1e-4)
-    b_scaled = b_view * (torch.finfo(torch.float8_e4m3fn).max / b_amax)
+    b_scaled = b_view * (torch.finfo(torch.float8_e4m3fnuz).max / b_amax)
     b = b_scaled.view_as(b_padded)[:K, :N]
-    b_scale = (b_amax / torch.finfo(torch.float8_e4m3fn).max).view(b_view.size(0), b_view.size(2))
+    b_scale = (b_amax / torch.finfo(torch.float8_e4m3fnuz).max).view(b_view.size(0), b_view.size(2))
 
-    b_fp8 = b.to(torch.float8_e4m3fn)
+    b_fp8 = b.to(torch.float8_e4m3fnuz)
     b_fp32 = b_fp8.to(torch.float32)
 
     return a_fp8, b_fp8, a_scale, b_scale
@@ -50,10 +50,10 @@ num_threads = torch.get_num_threads()
 print(f'Benchmarking on {num_threads} threads')
 results = []
 
-for m, n, k in ((64, 4096, 14336), (64, 8192, 28672), (64, 16384, 53248)):
+for m, n, k in ((512, 4096, 14336), (512, 8192, 28672), (512, 16384, 53248)):
 
     a_fp8, b_fp8, a_scale, b_scale = construct_amd_gemm(m, n, k)
-    c = torch.empty((m, n), device='cuda', dtype=torch.bfloat16)
+    c = torch.empty((m, n), device='cuda', dtype=torch.float16)
 
     label = 'FP8 GEMM Kernel Performance'
     sub_label = f'm: {m}, n: {n}, k: {k}'
@@ -75,7 +75,6 @@ for m, n, k in ((64, 4096, 14336), (64, 8192, 28672), (64, 16384, 53248)):
         label=label,
         sub_label=sub_label,
         description='AMD FP8 GEMM SplitK').blocked_autorange(min_run_time=1))
-    
-    
+       
 compare = benchmark.Compare(results)
 compare.print()
